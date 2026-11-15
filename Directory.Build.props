@@ -3,7 +3,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <Authors>Taoism</Authors>
     <Product>TaoRecipe</Product>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>

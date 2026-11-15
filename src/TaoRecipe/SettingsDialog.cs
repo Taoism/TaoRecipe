@@ -79,7 +79,13 @@ public sealed class SettingsDialog : DialogWindow
         }
 
         Section("Claude");
-        Add("Recipe engine", _engine);
+        var signIn = new Button { Content = "Sign in to Claude…" };
+        signIn.Click += async (_, _) =>
+        {
+            var tmp = new AppSettings { ClaudeCodePath = string.IsNullOrWhiteSpace(_claudePath.Text) ? "claude" : _claudePath.Text.Trim() };
+            await ClaudeLoginDialog.ShowAsync(this, tmp);
+        };
+        Add("Recipe engine", Row(8, _engine, signIn));
         Add("Claude Code", PathRow(_claudePath, async () => { if (await PickFileAsync("claude executable") is { } p) _claudePath.Text = p; }));
         Add("Anthropic API key", _anthropic);
         Add("Model", _model);

@@ -56,29 +56,8 @@ public static class ConnectionTester
         return string.Join(Environment.NewLine, lines);
     }
 
-    private static async Task<string> TestClaudeCodeAsync(AppSettings s, CancellationToken ct)
-    {
-        try
-        {
-            var res = await ProcessRunner.RunAsync(s.ClaudeCodePath, ["auth", "status"], ct,
-                removeEnv: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]).ConfigureAwait(false);
-            var json = JsonNode.Parse(res.StdOut[Math.Max(0, res.StdOut.IndexOf('{'))..]);
-            if (json?["loggedIn"]?.GetValue<bool>() != true)
-                return "✘ Claude Code: not signed in. Run `claude` in a terminal once and log in with your Claude account.";
-            var method = json["authMethod"]?.GetValue<string>() ?? "";
-            return method == "claude.ai"
-                ? "✔ Claude Code: signed in with your Claude subscription."
-                : $"✔ Claude Code: signed in ({method}). Note: this may bill API credit rather than your subscription.";
-        }
-        catch (InvalidOperationException)
-        {
-            return "✘ Claude Code: not found. Install it (claude.com/claude-code) or set its path.";
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            return "✘ Claude Code: could not read `claude auth status`. Is it up to date?";
-        }
-    }
+    private static async Task<string> TestClaudeCodeAsync(AppSettings s, CancellationToken ct) =>
+        "Claude: " + ClaudeAccount.Describe(await ClaudeAccount.GetStatusAsync(s, ct).ConfigureAwait(false));
 
     private static async Task<string> CheckAsync(HttpClient http, string path, string what, CancellationToken ct)
     {

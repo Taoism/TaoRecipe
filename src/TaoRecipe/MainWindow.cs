@@ -223,6 +223,9 @@ public sealed class MainWindow : Window
             return;
         }
 
+        if (_settings.Engine == Engines.ClaudeCode && !await ClaudeLoginDialog.EnsureSignedInAsync(this, _settings))
+            return;
+
         _cts = new CancellationTokenSource();
         SetBusy(true);
         var progress = new Progress<string>(Log);

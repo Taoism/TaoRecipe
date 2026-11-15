@@ -16,6 +16,7 @@ for (int i = 0; i < args.Length; i++)
         case "-l" or "--lang": settings.TargetLanguage = Next(); break;
         case "--no-notion": publish = false; break;
         case "--fresh": fresh = true; break;
+        case "--keep-local": settings.KeepLocalCopy = true; break;
         case "--model": settings.Model = Next(); break;
         case "--engine":
             settings.Engine = Next().ToLowerInvariant() switch
@@ -59,7 +60,7 @@ foreach (var input in inputs)
     {
         var results = await pipeline.ProcessAsync(input, new PipelineOptions { PublishToNotion = publish, Fresh = fresh }, log, cts.Token);
         foreach (var r in results)
-            Console.WriteLine($"  ✔ {r.Recipe.Title}\n    {r.Folder}" + (r.NotionUrl != null ? $"\n    {r.NotionUrl}" : ""));
+            Console.WriteLine($"  ✔ {r.Recipe.Title}" + (r.Folder != null ? $"\n    {r.Folder}" : "") + (r.NotionUrl != null ? $"\n    {r.NotionUrl}" : ""));
     }
     catch (OperationCanceledException)
     {
@@ -81,6 +82,7 @@ static void PrintHelp() => Console.WriteLine("""
 
       -l, --lang <language>     target language (default from settings, e.g. English)
       --no-notion               only write the local copy (JSON, Markdown, images)
+      --keep-local              keep the local copy after publishing to Notion (default: deleted)
       --fresh                   ignore the cached transcript / Claude result from an earlier run
       --engine claude|api       claude = your Claude subscription via Claude Code (default, no extra cost)
                                 api = Anthropic API key (billed per token)

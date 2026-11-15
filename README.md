@@ -3,9 +3,10 @@
 Turns cooking videos into written, translated recipes with step screenshots, and imports them into Notion.
 
 Input: any URL yt-dlp supports (YouTube, Instagram, TikTok, Facebook, Vimeo, Bilibili, …) or local video files.
-Output: one Notion page per recipe in a **Recipes** database. Each page has a cover shot, ingredient checklist, numbered method with a
-screenshot under each step and a timestamp link back into the video, plus tips. A local copy (`recipe.json`, `recipe.md`, JPEGs) goes to
-`Documents\TaoRecipe\<recipe>`.
+Output: one Notion page per recipe in a **Recipes** database. Each page gets its own icon (a square crop of the finished dish), an
+ingredient checklist, a numbered method with a screenshot under each step and a timestamp link back into the video, plus tips.
+The local working copy (`recipe.json`, `recipe.md`, JPEGs in `Documents\TaoRecipe\<recipe>`) is deleted once the page is in Notion,
+unless you tick *Keep local copy* (CLI `--keep-local`); with `--no-notion` it is always kept.
 
 ![TaoRecipe](screenshots/main.png)
 
@@ -26,6 +27,7 @@ Get `TaoRecipe-<version>-win-x64.zip` from [Releases](../../releases), unzip it 
      headless (`claude -p`, frames sent as images, `--json-schema` output). It uses your Pro/Max plan, not API credit.
    - **Anthropic API key**: billed per token; adaptive thinking and server-side refusal fallback (beta `server-side-fallback-2026-07-01`).
 5. **Screenshots**: for each step, ffmpeg tests 5 frames around the chosen moment and keeps the sharpest (Laplacian variance) at up to 1600 px.
+   Claude also picks the frame that best shows the finished dish and where the dish sits in it; a square crop of that becomes the 256 px page icon.
 6. **Notion**: API version 2026-03-11. The tool creates the database on first use under your parent page, uploads the images through the
    File Upload API, and creates the page.
 

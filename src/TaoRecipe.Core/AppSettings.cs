@@ -28,6 +28,8 @@ public sealed class AppSettings
     public string YtDlpExtraArgs { get; set; } = "";
     public string OutputFolder { get; set; } = DefaultOutputFolder;
     public bool KeepVideo { get; set; }
+    /// <summary>Keep the local JSON/Markdown/screenshot folder after the recipe is in Notion (off: it is deleted).</summary>
+    public bool KeepLocalCopy { get; set; }
 
     /// <summary>Notion page (ID or URL) that the Recipes database is created under.</summary>
     public string NotionParentPage { get; set; } = "";

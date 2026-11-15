@@ -65,20 +65,39 @@ public sealed partial class FrameTools(AppSettings settings)
     }
 
     /// <summary>Grabs the sharpest full-resolution frame near <paramref name="time"/> and writes it as JPEG.</summary>
-    public async Task<string> GrabBestAsync(string media, double time, double duration, string outPath, CancellationToken ct)
+    public async Task<string> GrabBestAsync(string media, double time, double duration, string outPath, CancellationToken ct, bool exact = false)
     {
-        double[] offsets = [0, -0.6, 0.6, -1.2, 1.2];
+        double[] offsets = exact ? [0] : [0, -0.6, 0.6, -1.2, 1.2];
         double best = time, bestScore = double.MinValue;
         foreach (var off in offsets)
         {
             var t = Math.Clamp(time + off, 0, Math.Max(0, duration - 0.2));
-            var score = await SharpnessAsync(media, t, ct).ConfigureAwait(false);
+            var score = offsets.Length == 1 ? 0 : await SharpnessAsync(media, t, ct).ConfigureAwait(false);
             if (score > bestScore) { bestScore = score; best = t; }
         }
         var res = await ProcessRunner.RunAsync(settings.FfmpegPath,
             ["-y", "-v", "error", "-ss", Sec(best), "-i", media, "-frames:v", "1", "-vf", "scale='min(1600,iw)':-2", "-q:v", "3", outPath], ct).ConfigureAwait(false);
         if (res.ExitCode != 0 || !File.Exists(outPath))
             throw new InvalidOperationException($"ffmpeg could not grab frame at {Format.Clock(time)}:\n" + VideoAcquirer.Tail(res.StdErr, 5));
+        return outPath;
+    }
+
+    /// <summary>
+    /// Crops a square around the dish (centre and size as fractions of the frame) out of the cover image and scales it to
+    /// a 256 px page icon. Out-of-range values fall back to the frame centre / 80 % of the height.
+    /// </summary>
+    public async Task<string> MakeIconAsync(string coverPath, double centerX, double centerY, double size, string outPath, CancellationToken ct)
+    {
+        static double Valid(double v, double fallback) => v > 0 && v <= 1 ? v : fallback;
+        var cx = Sec(Valid(centerX, 0.5));
+        var cy = Sec(Valid(centerY, 0.5));
+        // a little margin around the dish; never smaller than 35 % of the height, never larger than the frame
+        var s = Sec(Math.Clamp(Valid(size, 0.8) * 1.15, 0.35, 1.0));
+        var crop = $@"crop=w=min(min(iw\,ih)\,{s}*ih):h=min(min(iw\,ih)\,{s}*ih):x=max(0\,min(iw-ow\,{cx}*iw-ow/2)):y=max(0\,min(ih-oh\,{cy}*ih-oh/2)),scale=256:256";
+        var res = await ProcessRunner.RunAsync(settings.FfmpegPath,
+            ["-y", "-v", "error", "-i", coverPath, "-vf", crop, "-q:v", "2", outPath], ct).ConfigureAwait(false);
+        if (res.ExitCode != 0 || !File.Exists(outPath))
+            throw new InvalidOperationException("ffmpeg could not make the recipe icon:\n" + VideoAcquirer.Tail(res.StdErr, 5));
         return outPath;
     }
 

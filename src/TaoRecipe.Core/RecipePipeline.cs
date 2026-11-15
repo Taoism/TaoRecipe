@@ -4,7 +4,8 @@ using System.Text.Json;
 
 namespace TaoRecipe.Core;
 
-public sealed record RecipeResult(Recipe Recipe, string Folder, string? NotionUrl);
+/// <summary>One finished recipe. <see cref="Folder"/> is null when the local copy was removed after publishing.</summary>
+public sealed record RecipeResult(Recipe Recipe, string? Folder, string? NotionUrl);
 
 public sealed class PipelineOptions
 {
@@ -71,8 +72,12 @@ public sealed class RecipePipeline(AppSettings settings)
             Directory.CreateDirectory(folder);
             log.Report($"Grabbing step images for '{recipe.Title}'…");
             // the finished dish is nearly always shown at the end; use that when Claude gives no cover time
-            var coverTime = recipe.CoverTimestampSeconds > 1 ? recipe.CoverTimestampSeconds : Math.Max(0, video.DurationSeconds - 20);
-            recipe.CoverImage = await frameTools.GrabBestAsync(video.MediaPath, coverTime, video.DurationSeconds, Path.Combine(folder, "cover.jpg"), ct).ConfigureAwait(false);
+            // exact frame Claude looked at, so its dish position matches; without one, the end of the video
+            bool haveCover = recipe.CoverFrame > 0 && recipe.CoverTimestampSeconds >= 0; // 0:00 is valid: many videos open on the finished dish
+            var coverTime = haveCover ? recipe.CoverTimestampSeconds : Math.Max(0, video.DurationSeconds - 20);
+            recipe.CoverImage = await frameTools.GrabBestAsync(video.MediaPath, coverTime, video.DurationSeconds, Path.Combine(folder, "cover.jpg"), ct, exact: haveCover).ConfigureAwait(false);
+            recipe.IconImage = await frameTools.MakeIconAsync(recipe.CoverImage, recipe.DishCenterX, recipe.DishCenterY, recipe.DishSize,
+                Path.Combine(folder, "icon.jpg"), ct).ConfigureAwait(false);
             for (int i = 0; i < recipe.Steps.Count; i++)
             {
                 var s = recipe.Steps[i];
@@ -94,18 +99,38 @@ public sealed class RecipePipeline(AppSettings settings)
                 var url = await notion.PublishAsync(results[i].Recipe, video, extraction.SourceLanguage, log, ct).ConfigureAwait(false);
                 log.Report($"Notion: {url}");
                 results[i] = results[i] with { NotionUrl = url };
-                await File.WriteAllTextAsync(Path.Combine(results[i].Folder, "notion.url"), $"[InternetShortcut]\r\nURL={url}\r\n", ct).ConfigureAwait(false);
+                if (settings.KeepLocalCopy && results[i].Folder is { } dir)
+                    await File.WriteAllTextAsync(Path.Combine(dir, "notion.url"), $"[InternetShortcut]\r\nURL={url}\r\n", ct).ConfigureAwait(false);
             }
         }
 
         // 6. clean up (a failed run keeps the work folder so a retry is cheap)
+        bool deleteLocal = options.PublishToNotion && !settings.KeepLocalCopy;
         if (video.DownloadedByUs && settings.KeepVideo)
         {
-            var keep = Path.Combine(results[0].Folder, "video" + Path.GetExtension(video.MediaPath));
+            var name = deleteLocal ? Format.SafeFileName(results[0].Recipe.Title.Length > 0 ? results[0].Recipe.Title : video.Title) : "video";
+            var keep = Path.Combine(deleteLocal ? settings.OutputFolder : results[0].Folder ?? settings.OutputFolder, name + Path.GetExtension(video.MediaPath));
             if (!File.Exists(keep)) File.Move(video.MediaPath, keep);
         }
-        try { Directory.Delete(workDir, true); } catch (IOException) { /* still in use; harmless */ }
+        if (deleteLocal)
+        {
+            for (int i = 0; i < results.Count; i++)
+            {
+                TryDeleteDirectory(results[i].Folder);
+                results[i] = results[i] with { Folder = null };
+            }
+            log.Report("Local copy removed (it is in Notion now).");
+        }
+        TryDeleteDirectory(workDir);
         return results;
+    }
+
+    private static void TryDeleteDirectory(string? path)
+    {
+        if (path == null || !Directory.Exists(path)) return;
+        try { Directory.Delete(path, true); }
+        catch (IOException) { /* still in use; harmless */ }
+        catch (UnauthorizedAccessException) { /* read-only or locked; harmless */ }
     }
 
     private static string UniqueFolder(string path)

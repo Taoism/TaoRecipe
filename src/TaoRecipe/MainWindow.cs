@@ -275,8 +275,8 @@ public sealed class MainWindow : Window
     private void AddResult(RecipeResult r)
     {
         var title = new TextBlock { Text = r.Recipe.Title, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-        var folder = new Button { Content = "Folder", Classes = { "small" } };
-        folder.Click += (_, _) => Open(r.Folder);
+        var folder = new Button { Content = "Folder", Classes = { "small" }, IsVisible = r.Folder != null };
+        folder.Click += (_, _) => { if (r.Folder != null) Open(r.Folder); };
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 6 };
         AddAt(row, 0, title);
         AddAt(row, 1, folder);

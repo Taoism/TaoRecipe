@@ -20,7 +20,7 @@ public sealed class SettingsDialog : DialogWindow
     private readonly ComboBox _engine, _model, _effort, _whisper;
     private readonly TextBox _claudePath;
     private readonly NumericUpDown _maxFrames;
-    private readonly CheckBox _subs, _keepVideo;
+    private readonly CheckBox _subs, _keepVideo, _keepLocal;
     private readonly TextBlock _testResult;
 
     public SettingsDialog(AppSettings settings) : base("TaoRecipe settings", 640)
@@ -37,7 +37,8 @@ public sealed class SettingsDialog : DialogWindow
         _whisper = Combo(WhisperModels, settings.WhisperModel);
         _maxFrames = new NumericUpDown { Minimum = 10, Maximum = 100, Increment = 10, Value = settings.MaxFrames, FormatString = "0", Width = 130, HorizontalAlignment = HorizontalAlignment.Left };
         _subs = new CheckBox { Content = "Use uploader subtitles when available (faster than Whisper)", IsChecked = settings.PreferSubtitles };
-        _keepVideo = new CheckBox { Content = "Keep downloaded video in the recipe folder", IsChecked = settings.KeepVideo };
+        _keepVideo = new CheckBox { Content = "Keep downloaded video (in the output folder)", IsChecked = settings.KeepVideo };
+        _keepLocal = new CheckBox { Content = "Keep local copy (JSON, Markdown, screenshots) after it is in Notion", IsChecked = settings.KeepLocalCopy };
         _ytdlp = new TextBox { Text = settings.YtDlpPath };
         _ffmpeg = new TextBox { Text = settings.FfmpegPath };
         _extra = new TextBox { Text = settings.YtDlpExtraArgs, Watermark = "e.g. --cookies-from-browser firefox" };
@@ -102,6 +103,7 @@ public sealed class SettingsDialog : DialogWindow
         Add("yt-dlp extra arguments", _extra);
         Add("ffmpeg", PathRow(_ffmpeg, async () => { if (await PickFileAsync("ffmpeg executable") is { } p) _ffmpeg.Text = p; }));
         Add("Output folder", PathRow(_output, PickOutputAsync));
+        Add("", _keepLocal);
         Add("", _keepVideo);
 
         var help = Label("Notion: create an internal integration at notion.so/profile/integrations, copy its secret, then open your parent page → ••• → Connections → add the integration.", muted: true);
@@ -140,6 +142,7 @@ public sealed class SettingsDialog : DialogWindow
         t.MaxFrames = (int)(_maxFrames.Value ?? 90);
         t.PreferSubtitles = _subs.IsChecked == true;
         t.KeepVideo = _keepVideo.IsChecked == true;
+        t.KeepLocalCopy = _keepLocal.IsChecked == true;
         t.YtDlpPath = string.IsNullOrWhiteSpace(_ytdlp.Text) ? "yt-dlp" : _ytdlp.Text.Trim();
         t.FfmpegPath = string.IsNullOrWhiteSpace(_ffmpeg.Text) ? "ffmpeg" : _ffmpeg.Text.Trim();
         t.YtDlpExtraArgs = (_extra.Text ?? "").Trim();

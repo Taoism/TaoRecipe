@@ -117,22 +117,22 @@ public sealed partial class NotionPublisher : IDisposable
     {
         var ds = await EnsureDataSourceAsync(log, ct).ConfigureAwait(false);
 
-        log.Report($"Uploading {recipe.Steps.Count(s => s.Image != null) + (recipe.CoverImage != null ? 1 : 0)} images to Notion…");
-        string? coverUpload = recipe.CoverImage != null ? await UploadAsync(recipe.CoverImage, ct).ConfigureAwait(false) : null;
+        log.Report($"Uploading {recipe.Steps.Count(s => s.Image != null) + (recipe.IconImage != null ? 1 : 0)} images to Notion…");
+        string? iconUpload = recipe.IconImage != null ? await UploadAsync(recipe.IconImage, ct).ConfigureAwait(false) : null;
         var stepUploads = new Dictionary<RecipeStep, string>();
         foreach (var step in recipe.Steps.Where(s => s.Image != null))
             stepUploads[step] = await UploadAsync(step.Image!, ct).ConfigureAwait(false);
 
-        var blocks = BuildBlocks(recipe, video, sourceLanguage, stepUploads, coverUpload);
+        var blocks = BuildBlocks(recipe, video, sourceLanguage, stepUploads);
         var page = new JsonObject
         {
             ["parent"] = new JsonObject { ["type"] = "data_source_id", ["data_source_id"] = ds.Id },
-            ["icon"] = new JsonObject { ["type"] = "emoji", ["emoji"] = "🍳" },
+            ["icon"] = iconUpload != null
+                ? new JsonObject { ["type"] = "file_upload", ["file_upload"] = new JsonObject { ["id"] = iconUpload } }
+                : new JsonObject { ["type"] = "emoji", ["emoji"] = "🍳" },
             ["properties"] = BuildProperties(recipe, video, sourceLanguage, ds.PropertyTypes),
             ["children"] = new JsonArray(blocks.Take(100).Select(b => (JsonNode)b).ToArray()),
         };
-        if (coverUpload != null)
-            page["cover"] = new JsonObject { ["type"] = "file_upload", ["file_upload"] = new JsonObject { ["id"] = coverUpload } };
 
         log.Report("Creating Notion page…");
         var created = await SendAsync(HttpMethod.Post, "pages", page, ct).ConfigureAwait(false)
@@ -197,7 +197,7 @@ public sealed partial class NotionPublisher : IDisposable
     }
 
     private static List<JsonObject> BuildBlocks(Recipe r, VideoSource video, string sourceLanguage,
-        Dictionary<RecipeStep, string> stepUploads, string? coverUpload)
+        Dictionary<RecipeStep, string> stepUploads)
     {
         var b = new List<JsonObject>();
 
@@ -220,7 +220,7 @@ public sealed partial class NotionPublisher : IDisposable
                 ? Block("video", new JsonObject { ["type"] = "external", ["external"] = new JsonObject { ["url"] = video.SourceUrl } })
                 : Block("bookmark", new JsonObject { ["url"] = video.SourceUrl }));
         }
-        else if (coverUpload == null && r.CoverImage == null)
+        else
         {
             b.Add(Paragraph($"Source: {Path.GetFileName(video.MediaPath)}"));
         }

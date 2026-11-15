@@ -26,10 +26,21 @@ public sealed class Recipe
     [JsonPropertyName("equipment")] public List<string> Equipment { get; set; } = [];
     [JsonPropertyName("steps")] public List<RecipeStep> Steps { get; set; } = [];
     [JsonPropertyName("tips")] public List<string> Tips { get; set; } = [];
+    /// <summary>Number of the sampled frame (as labelled for Claude) that best shows the finished dish.</summary>
+    [JsonPropertyName("cover_frame")] public int CoverFrame { get; set; }
+    /// <summary>Video time of that frame (filled from <see cref="CoverFrame"/> after extraction).</summary>
     [JsonPropertyName("cover_timestamp_seconds")] public double CoverTimestampSeconds { get; set; }
+    /// <summary>Centre of the finished dish in the cover frame, as fractions of width/height (0–1).</summary>
+    [JsonPropertyName("dish_center_x")] public double DishCenterX { get; set; } = 0.5;
+    [JsonPropertyName("dish_center_y")] public double DishCenterY { get; set; } = 0.5;
+    /// <summary>Size of the dish as a fraction of the frame height (0–1).</summary>
+    [JsonPropertyName("dish_size")] public double DishSize { get; set; } = 0.8;
 
     /// <summary>Local path of the cover screen grab (filled after extraction).</summary>
     [JsonPropertyName("cover_image")] public string? CoverImage { get; set; }
+
+    /// <summary>Local path of the square page icon cropped from the cover (filled after extraction).</summary>
+    [JsonPropertyName("icon_image")] public string? IconImage { get; set; }
 }
 
 public sealed class IngredientGroup

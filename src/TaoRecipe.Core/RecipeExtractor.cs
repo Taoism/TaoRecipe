@@ -18,9 +18,22 @@ public sealed class RecipeExtractor(AppSettings settings)
     {
         var parts = BuildParts(video, transcript, frames);
         log.Report($"Asking {settings.Model} ({(settings.Engine == Engines.AnthropicApi ? "API key" : "Claude subscription")}) to write the recipe in {settings.TargetLanguage} ({frames.Count} frames, {transcript.Segments.Count} transcript lines)…");
-        return settings.Engine == Engines.AnthropicApi
+        return WithCoverTimesAsync(settings.Engine == Engines.AnthropicApi
             ? ExtractViaApiAsync(parts, log, ct)
-            : ExtractViaClaudeCodeAsync(parts, workDir, log, ct);
+            : ExtractViaClaudeCodeAsync(parts, workDir, log, ct), frames);
+    }
+
+    /// <summary>Turns each recipe's chosen cover frame number into a video time.</summary>
+    private static async Task<RecipeExtraction> WithCoverTimesAsync(Task<RecipeExtraction> extraction, IReadOnlyList<SampledFrame> frames)
+    {
+        var result = await extraction.ConfigureAwait(false);
+        foreach (var r in result.Recipes)
+        {
+            var frame = frames.FirstOrDefault(f => f.Index == r.CoverFrame);
+            r.CoverTimestampSeconds = frame?.Time ?? -1;
+            if (frame == null) r.CoverFrame = 0;
+        }
+        return result;
     }
 
     // ---------------- Anthropic API (pay per token) ----------------
@@ -252,8 +265,11 @@ public sealed class RecipeExtractor(AppSettings settings)
         times, visual cues for doneness). Give each step a short title. For timestamp_seconds pick the moment
         in the video where the step's result is shown most clearly (use the frame timestamps as a guide);
         set has_visual false when nothing useful is visible for that step (e.g. talking head only).
-        cover_timestamp_seconds is the video time (in seconds, never 0) of the best-looking shot of the finished dish,
-        usually near the end of the video; pick it from the frame timestamps.
+        cover_frame is the number of the frame (from the "Frame N" labels) that best shows the FINISHED dish, plated or
+        sliced; usually near the end. Never pick a frame of raw ingredients or work in progress. For that frame also give
+        dish_center_x and dish_center_y (where the centre of the dish is, as a fraction 0–1 of the frame width and
+        height, measured from the top-left) and dish_size (how tall the dish appears, as a fraction 0–1 of the frame
+        height); a square crop around it becomes the recipe's icon.
 
         If the video contains several separate recipes (e.g. a sauce and a main dish that are each made
         from scratch), return each as its own recipe. Ignore sponsor segments and channel promotion. If the
@@ -311,7 +327,10 @@ public sealed class RecipeExtractor(AppSettings settings)
             ("equipment", Arr(new Dictionary<string, object> { ["type"] = "string" })),
             ("steps", Arr(step)),
             ("tips", Arr(new Dictionary<string, object> { ["type"] = "string" })),
-            ("cover_timestamp_seconds", Num("Video time of the best shot of the finished dish")));
+            ("cover_frame", new Dictionary<string, object> { ["type"] = "integer", ["description"] = "Frame number showing the finished dish best" }),
+            ("dish_center_x", Num("Horizontal centre of the dish in that shot, 0-1 of frame width")),
+            ("dish_center_y", Num("Vertical centre of the dish in that shot, 0-1 of frame height")),
+            ("dish_size", Num("Height of the dish in that shot, 0-1 of frame height")));
         var root = Obj(
             ("source_language", Str("Language spoken in the video")),
             ("recipes", Arr(recipe)),

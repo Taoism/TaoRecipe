@@ -1,0 +1,12 @@
+TaoRecipe uses these third-party components:
+
+- Anthropic C# SDK (MIT) https://github.com/anthropics/anthropic-sdk-csharp
+- Whisper.net (MIT) https://github.com/sandrohanea/whisper.net, including whisper.cpp / ggml (MIT) https://github.com/ggml-org/whisper.cpp
+- Avalonia UI (MIT) https://github.com/AvaloniaUI/Avalonia
+- Inter font (SIL Open Font License 1.1)
+- System.Security.Cryptography.ProtectedData (MIT, .NET Foundation)
+
+Not bundled, used at run time if installed:
+- yt-dlp (Unlicense) https://github.com/yt-dlp/yt-dlp
+- FFmpeg (LGPL/GPL) https://ffmpeg.org
+- Whisper models are downloaded from https://huggingface.co/ggerganov/whisper.cpp (MIT)

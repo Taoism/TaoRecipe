@@ -1,0 +1,7 @@
+bin/
+obj/
+.vs/
+.sonarqube/
+*.user
+publish/
+release/

@@ -9,19 +9,24 @@ internal static class ProcessRunner
 {
     /// <summary>Runs a process with an argument list (no shell), collecting output. Optional per-line callback for stderr.</summary>
     public static async Task<ProcessResult> RunAsync(string exe, IEnumerable<string> args, CancellationToken ct,
-        Action<string>? onStdErrLine = null, Action<string>? onStdOutLine = null)
+        Action<string>? onStdErrLine = null, Action<string>? onStdOutLine = null,
+        string? stdin = null, string? workingDirectory = null, IEnumerable<string>? removeEnv = null)
     {
         var psi = new ProcessStartInfo(exe)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = stdin != null,
             UseShellExecute = false,
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
+        if (stdin != null) psi.StandardInputEncoding = new UTF8Encoding(false);
+        if (workingDirectory != null) psi.WorkingDirectory = workingDirectory;
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment["PYTHONIOENCODING"] = "utf-8";
+        foreach (var name in removeEnv ?? []) psi.Environment.Remove(name);
 
         using var p = new Process { StartInfo = psi };
         var stdout = new StringBuilder();
@@ -38,6 +43,11 @@ internal static class ProcessRunner
         }
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
+        if (stdin != null)
+        {
+            await p.StandardInput.WriteAsync(stdin.AsMemory(), ct).ConfigureAwait(false);
+            p.StandardInput.Close();
+        }
         try
         {
             await p.WaitForExitAsync(ct).ConfigureAwait(false);

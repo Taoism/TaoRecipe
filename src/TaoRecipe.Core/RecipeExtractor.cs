@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Anthropic;
 using Anthropic.Models.Beta.Messages;
 
@@ -10,16 +11,27 @@ public sealed class RecipeExtractor(AppSettings settings)
 {
     private static readonly JsonSerializerOptions ReadOptions = new() { PropertyNameCaseInsensitive = true };
 
-    public async Task<RecipeExtraction> ExtractAsync(VideoSource video, Transcript transcript, IReadOnlyList<SampledFrame> frames,
-        IProgress<string> log, CancellationToken ct)
+    private sealed record Part(string? Text, string? ImagePath);
+
+    public Task<RecipeExtraction> ExtractAsync(VideoSource video, Transcript transcript, IReadOnlyList<SampledFrame> frames,
+        string workDir, IProgress<string> log, CancellationToken ct)
+    {
+        var parts = BuildParts(video, transcript, frames);
+        log.Report($"Asking {settings.Model} ({(settings.Engine == Engines.AnthropicApi ? "API key" : "Claude subscription")}) to write the recipe in {settings.TargetLanguage} ({frames.Count} frames, {transcript.Segments.Count} transcript lines)…");
+        return settings.Engine == Engines.AnthropicApi
+            ? ExtractViaApiAsync(parts, log, ct)
+            : ExtractViaClaudeCodeAsync(parts, workDir, log, ct);
+    }
+
+    // ---------------- Anthropic API (pay per token) ----------------
+
+    private async Task<RecipeExtraction> ExtractViaApiAsync(List<Part> parts, IProgress<string> log, CancellationToken ct)
     {
         var apiKey = settings.AnthropicApiKey;
         if (string.IsNullOrWhiteSpace(apiKey))
-            throw new InvalidOperationException("No Anthropic API key set (Settings, or the ANTHROPIC_API_KEY environment variable).");
+            throw new InvalidOperationException("No Anthropic API key set (Settings, or the ANTHROPIC_API_KEY environment variable). Or switch the recipe engine to your Claude subscription.");
 
         var client = new AnthropicClient { ApiKey = apiKey };
-        var content = BuildContent(video, transcript, frames);
-
         var parameters = new MessageCreateParams
         {
             Model = settings.Model,
@@ -33,36 +45,166 @@ public sealed class RecipeExtractor(AppSettings settings)
             },
             Betas = ["server-side-fallback-2026-07-01"],
             Fallbacks = new Default(),
-            Messages = [new BetaUserMessageParam { Content = content }],
+            Messages = [new BetaUserMessageParam { Content = ToApiBlocks(parts) }],
         };
 
-        log.Report($"Asking {settings.Model} to write the recipe in {settings.TargetLanguage} ({frames.Count} frames, {transcript.Segments.Count} transcript lines)…");
         var text = new StringBuilder();
         string? stopReason = null;
         long inTokens = 0, outTokens = 0;
-        await foreach (var ev in client.Beta.Messages.CreateStreaming(parameters, ct).ConfigureAwait(false))
+        try
         {
-            if (ev.TryPickContentBlockDelta(out var delta) && delta.Delta.TryPickText(out var t))
-                text.Append(t.Text);
-            else if (ev.TryPickStart(out var start))
-                inTokens = start.Message.Usage.InputTokens;
-            else if (ev.TryPickDelta(out var md))
+            await foreach (var ev in client.Beta.Messages.CreateStreaming(parameters, ct).ConfigureAwait(false))
             {
-                stopReason = md.Delta.StopReason?.Raw();
-                outTokens = md.Usage.OutputTokens;
+                if (ev.TryPickContentBlockDelta(out var delta) && delta.Delta.TryPickText(out var t))
+                    text.Append(t.Text);
+                else if (ev.TryPickStart(out var start))
+                    inTokens = start.Message.Usage.InputTokens;
+                else if (ev.TryPickDelta(out var md))
+                {
+                    stopReason = md.Delta.StopReason?.Raw();
+                    outTokens = md.Usage.OutputTokens;
+                }
             }
+        }
+        catch (Anthropic.Exceptions.AnthropicException ex)
+        {
+            throw new InvalidOperationException("Anthropic API: " + ApiErrorMessage(ex.Message), ex);
         }
         log.Report($"Claude done: {inTokens:N0} input / {outTokens:N0} output tokens.");
 
         if (stopReason == "refusal") throw new InvalidOperationException("Claude declined to process this video.");
         if (stopReason == "max_tokens") throw new InvalidOperationException("Claude's answer was cut off (max_tokens).");
-
-        var result = JsonSerializer.Deserialize<RecipeExtraction>(text.ToString(), ReadOptions)
-            ?? throw new InvalidOperationException("Claude returned no recipe data.");
-        return result;
+        return Parse(text.ToString());
     }
 
-    private static List<BetaContentBlockParam> BuildContent(VideoSource video, Transcript transcript, IReadOnlyList<SampledFrame> frames)
+    /// <summary>Pulls the human-readable message out of an API error body, with a hint for the common billing case.</summary>
+    private static string ApiErrorMessage(string raw)
+    {
+        var msg = raw;
+        var start = raw.IndexOf('{');
+        if (start >= 0)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(raw[start..]);
+                if (doc.RootElement.TryGetProperty("error", out var e) && e.TryGetProperty("message", out var m))
+                    msg = m.GetString() ?? raw;
+            }
+            catch (JsonException)
+            {
+                // not JSON; keep the raw text
+            }
+        }
+        if (msg.Contains("credit balance", StringComparison.OrdinalIgnoreCase))
+            msg += " Add credits at console.anthropic.com → Billing, or switch the recipe engine to your Claude subscription in Settings.";
+        return msg;
+    }
+
+    private static List<BetaContentBlockParam> ToApiBlocks(List<Part> parts) => parts.Select(p => p.ImagePath == null
+        ? (BetaContentBlockParam)new BetaTextBlockParam { Text = p.Text! }
+        : new BetaImageBlockParam
+        {
+            Source = new BetaBase64ImageSource
+            {
+                Data = Convert.ToBase64String(File.ReadAllBytes(p.ImagePath)),
+                MediaType = MediaType.ImageJpeg,
+            },
+        }).ToList();
+
+    // ---------------- Claude Code CLI (Claude subscription) ----------------
+
+    private async Task<RecipeExtraction> ExtractViaClaudeCodeAsync(List<Part> parts, string workDir, IProgress<string> log, CancellationToken ct)
+    {
+        var content = new JsonArray();
+        foreach (var p in parts)
+        {
+            content.Add(p.ImagePath == null
+                ? new JsonObject { ["type"] = "text", ["text"] = p.Text }
+                : new JsonObject
+                {
+                    ["type"] = "image",
+                    ["source"] = new JsonObject
+                    {
+                        ["type"] = "base64",
+                        ["media_type"] = "image/jpeg",
+                        ["data"] = Convert.ToBase64String(await File.ReadAllBytesAsync(p.ImagePath, ct).ConfigureAwait(false)),
+                    },
+                });
+        }
+        var message = new JsonObject
+        {
+            ["type"] = "user",
+            ["message"] = new JsonObject { ["role"] = "user", ["content"] = content },
+        };
+
+        var schema = JsonSerializer.Serialize(Schema());
+        string[] args =
+        [
+            "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+            "--model", settings.Model, "--effort", settings.Effort,
+            "--tools", "", "--strict-mcp-config", "--setting-sources", "project", "--no-session-persistence",
+            "--system-prompt", SystemPrompt(settings.TargetLanguage),
+            "--json-schema", schema,
+        ];
+
+        // Without ANTHROPIC_API_KEY in its environment the CLI uses the user's Claude login (subscription), not API credit.
+        ProcessResult res;
+        try
+        {
+            res = await ProcessRunner.RunAsync(settings.ClaudeCodePath, args, ct,
+                stdin: message.ToJsonString() + "\n", workingDirectory: workDir,
+                removeEnv: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException("Claude Code is not installed or not on PATH (needed for the Claude subscription engine). " +
+                "Install it from claude.com/claude-code and sign in once with `claude`, or set its path in Settings.", ex);
+        }
+
+        JsonNode? result = null;
+        foreach (var line in res.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!line.StartsWith('{')) continue;
+            JsonNode? node;
+            try { node = JsonNode.Parse(line); } catch (JsonException) { continue; }
+            if (node?["type"]?.GetValue<string>() == "result") result = node;
+        }
+        if (result == null)
+            throw new InvalidOperationException("Claude Code returned no result:\n" + VideoAcquirer.Tail(res.StdErr.Length > 0 ? res.StdErr : res.StdOut, 8));
+
+        var isError = result["is_error"]?.GetValue<bool>() == true || result["subtype"]?.GetValue<string>() != "success";
+        var resultText = result["result"]?.ToString() ?? "";
+        if (isError)
+        {
+            var hint = resultText.Contains("login", StringComparison.OrdinalIgnoreCase) || resultText.Contains("auth", StringComparison.OrdinalIgnoreCase)
+                ? " Run `claude` once in a terminal and sign in with your Claude account."
+                : "";
+            throw new InvalidOperationException($"Claude Code: {(resultText.Length > 0 ? resultText : result["subtype"]?.ToString())}{hint}");
+        }
+
+        var usage = result["usage"];
+        log.Report($"Claude done in {result["duration_ms"]?.GetValue<double>() / 1000:0}s: " +
+            $"{(usage?["input_tokens"]?.GetValue<long>() ?? 0) + (usage?["cache_creation_input_tokens"]?.GetValue<long>() ?? 0) + (usage?["cache_read_input_tokens"]?.GetValue<long>() ?? 0):N0} input / " +
+            $"{usage?["output_tokens"]?.GetValue<long>() ?? 0:N0} output tokens (subscription).");
+
+        var structured = result["structured_output"];
+        return structured is JsonObject
+            ? structured.Deserialize<RecipeExtraction>(ReadOptions) ?? throw new InvalidOperationException("Claude returned no recipe data.")
+            : Parse(resultText);
+    }
+
+    private static RecipeExtraction Parse(string json)
+    {
+        json = json.Trim();
+        if (json.StartsWith("```", StringComparison.Ordinal))
+            json = json[(json.IndexOf('\n') + 1)..].TrimEnd('`').Trim();
+        return JsonSerializer.Deserialize<RecipeExtraction>(json, ReadOptions)
+            ?? throw new InvalidOperationException("Claude returned no recipe data.");
+    }
+
+    // ---------------- prompt ----------------
+
+    private static List<Part> BuildParts(VideoSource video, Transcript transcript, IReadOnlyList<SampledFrame> frames)
     {
         var sb = new StringBuilder();
         sb.AppendLine("<video>");
@@ -83,21 +225,14 @@ public sealed class RecipeExtractor(AppSettings settings)
         sb.AppendLine("</transcript>");
         sb.AppendLine($"Below are {frames.Count} frames sampled from the video, each labelled with its timestamp.");
 
-        var blocks = new List<BetaContentBlockParam> { new BetaTextBlockParam { Text = sb.ToString() } };
+        var parts = new List<Part> { new(sb.ToString(), null) };
         foreach (var f in frames)
         {
-            blocks.Add(new BetaTextBlockParam { Text = $"Frame {f.Index} at {Format.Clock(f.Time)} ({f.Time:0.0} s):" });
-            blocks.Add(new BetaImageBlockParam
-            {
-                Source = new BetaBase64ImageSource
-                {
-                    Data = Convert.ToBase64String(File.ReadAllBytes(f.Path)),
-                    MediaType = MediaType.ImageJpeg,
-                },
-            });
+            parts.Add(new($"Frame {f.Index} at {Format.Clock(f.Time)} ({f.Time:0.0} s):", null));
+            parts.Add(new(null, f.Path));
         }
-        blocks.Add(new BetaTextBlockParam { Text = "Write the recipe(s) from this video now." });
-        return blocks;
+        parts.Add(new("Write the recipe(s) from this video now.", null));
+        return parts;
     }
 
     private static string SystemPrompt(string language) => $"""
@@ -117,7 +252,8 @@ public sealed class RecipeExtractor(AppSettings settings)
         times, visual cues for doneness). Give each step a short title. For timestamp_seconds pick the moment
         in the video where the step's result is shown most clearly (use the frame timestamps as a guide);
         set has_visual false when nothing useful is visible for that step (e.g. talking head only).
-        cover_timestamp_seconds is the best-looking shot of the finished dish.
+        cover_timestamp_seconds is the video time (in seconds, never 0) of the best-looking shot of the finished dish,
+        usually near the end of the video; pick it from the frame timestamps.
 
         If the video contains several separate recipes (e.g. a sauce and a main dish that are each made
         from scratch), return each as its own recipe. Ignore sponsor segments and channel promotion. If the

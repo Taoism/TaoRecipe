@@ -56,7 +56,7 @@ public sealed class RecipePipeline(AppSettings settings)
         else
         {
             var frames = await frameTools.SampleAsync(video.MediaPath, workDir, log, ct).ConfigureAwait(false);
-            extraction = await new RecipeExtractor(settings).ExtractAsync(video, transcript, frames, log, ct).ConfigureAwait(false);
+            extraction = await new RecipeExtractor(settings).ExtractAsync(video, transcript, frames, workDir, log, ct).ConfigureAwait(false);
             await File.WriteAllTextAsync(extractionCache, JsonSerializer.Serialize(extraction, JsonOut), ct).ConfigureAwait(false);
         }
         if (extraction.Recipes.Count == 0)
@@ -70,11 +70,9 @@ public sealed class RecipePipeline(AppSettings settings)
             var folder = UniqueFolder(Path.Combine(settings.OutputFolder, Format.SafeFileName(recipe.Title.Length > 0 ? recipe.Title : video.Title)));
             Directory.CreateDirectory(folder);
             log.Report($"Grabbing step images for '{recipe.Title}'…");
-            if (recipe.CoverTimestampSeconds > 0 || recipe.Steps.Count == 0)
-            {
-                var t = recipe.CoverTimestampSeconds > 0 ? recipe.CoverTimestampSeconds : video.DurationSeconds * 0.9;
-                recipe.CoverImage = await frameTools.GrabBestAsync(video.MediaPath, t, video.DurationSeconds, Path.Combine(folder, "cover.jpg"), ct).ConfigureAwait(false);
-            }
+            // the finished dish is nearly always shown at the end; use that when Claude gives no cover time
+            var coverTime = recipe.CoverTimestampSeconds > 1 ? recipe.CoverTimestampSeconds : Math.Max(0, video.DurationSeconds - 20);
+            recipe.CoverImage = await frameTools.GrabBestAsync(video.MediaPath, coverTime, video.DurationSeconds, Path.Combine(folder, "cover.jpg"), ct).ConfigureAwait(false);
             for (int i = 0; i < recipe.Steps.Count; i++)
             {
                 var s = recipe.Steps[i];

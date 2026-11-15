@@ -10,13 +10,15 @@ namespace TaoRecipe;
 
 public sealed class SettingsDialog : DialogWindow
 {
+    private static readonly string[] EngineNames = ["Claude subscription (Claude Code, no extra cost)", "Anthropic API key (billed per token)"];
     private static readonly string[] Models = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2", "claude-haiku-5-5"];
     private static readonly string[] Efforts = ["low", "medium", "high", "max"];
     private static readonly string[] WhisperModels = ["LargeV3Turbo", "LargeV3", "Medium", "Small", "Base"];
 
     private readonly AppSettings _s;
     private readonly TextBox _anthropic, _notion, _parent, _database, _ytdlp, _ffmpeg, _extra, _output;
-    private readonly ComboBox _model, _effort, _whisper;
+    private readonly ComboBox _engine, _model, _effort, _whisper;
+    private readonly TextBox _claudePath;
     private readonly NumericUpDown _maxFrames;
     private readonly CheckBox _subs, _keepVideo;
     private readonly TextBlock _testResult;
@@ -28,6 +30,8 @@ public sealed class SettingsDialog : DialogWindow
         _notion = Secret(settings.NotionToken, "ntn_… (internal integration secret)");
         _parent = new TextBox { Text = settings.NotionParentPage, Watermark = "Notion page URL — the Recipes database is created here" };
         _database = new TextBox { Text = settings.NotionDatabase, Watermark = "optional: existing database URL (filled in automatically)" };
+        _engine = Combo(EngineNames, settings.Engine == Engines.AnthropicApi ? EngineNames[1] : EngineNames[0]);
+        _claudePath = new TextBox { Text = settings.ClaudeCodePath, Watermark = "claude" };
         _model = Combo(Models, settings.Model);
         _effort = Combo(Efforts, settings.Effort);
         _whisper = Combo(WhisperModels, settings.WhisperModel);
@@ -75,6 +79,8 @@ public sealed class SettingsDialog : DialogWindow
         }
 
         Section("Claude");
+        Add("Recipe engine", _engine);
+        Add("Claude Code", PathRow(_claudePath, async () => { if (await PickFileAsync("claude executable") is { } p) _claudePath.Text = p; }));
         Add("Anthropic API key", _anthropic);
         Add("Model", _model);
         Add("Effort", _effort);
@@ -110,11 +116,14 @@ public sealed class SettingsDialog : DialogWindow
         ItemsSource = items,
         SelectedItem = items.Contains(value) ? value : items[0],
         MinWidth = 200,
+        MaxWidth = 420,
         HorizontalAlignment = HorizontalAlignment.Left,
     };
 
     private void Apply(AppSettings t)
     {
+        t.Engine = _engine.SelectedIndex == 1 ? Engines.AnthropicApi : Engines.ClaudeCode;
+        t.ClaudeCodePath = string.IsNullOrWhiteSpace(_claudePath.Text) ? "claude" : _claudePath.Text.Trim();
         t.AnthropicApiKey = _anthropic.Text ?? "";
         t.NotionToken = _notion.Text ?? "";
         t.NotionParentPage = (_parent.Text ?? "").Trim();

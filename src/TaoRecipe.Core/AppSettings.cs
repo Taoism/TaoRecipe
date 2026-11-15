@@ -5,10 +5,19 @@ using System.Text.Json.Serialization;
 
 namespace TaoRecipe.Core;
 
+public static class Engines
+{
+    public const string ClaudeCode = "ClaudeCode";
+    public const string AnthropicApi = "AnthropicApi";
+}
+
 /// <summary>User settings, stored in %APPDATA%\TaoRecipe\settings.json. Secrets are DPAPI-protected on Windows.</summary>
 public sealed class AppSettings
 {
     public string TargetLanguage { get; set; } = "English";
+    /// <summary>"ClaudeCode" = the installed Claude Code CLI on the user's Claude subscription; "AnthropicApi" = API key (billed per token).</summary>
+    public string Engine { get; set; } = Engines.ClaudeCode;
+    public string ClaudeCodePath { get; set; } = "claude";
     public string Model { get; set; } = "claude-opus-5-5";
     public string Effort { get; set; } = "high";
     public string WhisperModel { get; set; } = "LargeV3Turbo";

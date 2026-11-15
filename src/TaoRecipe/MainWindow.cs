@@ -141,9 +141,9 @@ public sealed class MainWindow : Window
 
         Opened += async (_, _) =>
         {
-            if (string.IsNullOrWhiteSpace(_settings.AnthropicApiKey) || string.IsNullOrWhiteSpace(_settings.NotionToken))
+            if ((_settings.Engine == Engines.AnthropicApi && string.IsNullOrWhiteSpace(_settings.AnthropicApiKey)) || string.IsNullOrWhiteSpace(_settings.NotionToken))
             {
-                Log("Welcome! Open Settings to enter your Anthropic API key and Notion integration token first.");
+                Log("Welcome! Open Settings to enter your Notion integration token (and choose the recipe engine) first.");
                 await new SettingsDialog(_settings).ShowDialog<bool>(this);
             }
         };
@@ -212,12 +212,13 @@ public sealed class MainWindow : Window
             return;
         }
         bool publish = _publish.IsChecked == true;
-        if (string.IsNullOrWhiteSpace(_settings.AnthropicApiKey) ||
+        bool needKey = _settings.Engine == Engines.AnthropicApi && string.IsNullOrWhiteSpace(_settings.AnthropicApiKey);
+        if (needKey ||
             (publish && (string.IsNullOrWhiteSpace(_settings.NotionToken) || (NotionPublisher.ParseId(_settings.NotionParentPage) == null && NotionPublisher.ParseId(_settings.NotionDatabase) == null))))
         {
             await MessageBox.ShowAsync(this, publish
-                ? "Set your Anthropic API key, Notion token and Notion page (or database) in Settings first."
-                : "Set your Anthropic API key in Settings first.", MessageKind.Warning, "TaoRecipe");
+                ? "Set your Notion token and Notion database (or parent page) in Settings first" + (needKey ? ", plus your Anthropic API key (or switch the engine to your Claude subscription)." : ".")
+                : "Set your Anthropic API key in Settings first, or switch the recipe engine to your Claude subscription.", MessageKind.Warning, "TaoRecipe");
             await new SettingsDialog(_settings).ShowDialog<bool>(this);
             return;
         }

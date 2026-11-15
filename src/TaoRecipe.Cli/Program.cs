@@ -17,6 +17,15 @@ for (int i = 0; i < args.Length; i++)
         case "--no-notion": publish = false; break;
         case "--fresh": fresh = true; break;
         case "--model": settings.Model = Next(); break;
+        case "--engine":
+            settings.Engine = Next().ToLowerInvariant() switch
+            {
+                "api" => Engines.AnthropicApi,
+                "claude" or "subscription" => Engines.ClaudeCode,
+                var e => throw new ArgumentException($"Unknown engine '{e}' (use claude or api)"),
+            };
+            break;
+        case "--set-engine": settings.Engine = Next().Equals("api", StringComparison.OrdinalIgnoreCase) ? Engines.AnthropicApi : Engines.ClaudeCode; settings.Save(); Console.WriteLine($"Engine saved: {settings.Engine}."); break;
         case "--whisper": settings.WhisperModel = Next(); break;
         case "--out": settings.OutputFolder = Next(); break;
         case "--set-anthropic-key": settings.AnthropicApiKey = Next(); settings.Save(); Console.WriteLine("Anthropic key saved."); break;
@@ -73,12 +82,15 @@ static void PrintHelp() => Console.WriteLine("""
       -l, --lang <language>     target language (default from settings, e.g. English)
       --no-notion               only write the local copy (JSON, Markdown, images)
       --fresh                   ignore the cached transcript / Claude result from an earlier run
+      --engine claude|api       claude = your Claude subscription via Claude Code (default, no extra cost)
+                                api = Anthropic API key (billed per token)
       --model <id>              Claude model (default claude-opus-5-5)
       --whisper <model>         Whisper model: LargeV3Turbo, LargeV3, Medium, Small, Base…
       --out <folder>            output folder for the local copies
 
     One-time setup (stored in %APPDATA%\TaoRecipe\settings.json, secrets DPAPI-encrypted):
-      --set-anthropic-key <key>    or set ANTHROPIC_API_KEY
+      --set-engine claude|api      default recipe engine
+      --set-anthropic-key <key>    only for --engine api; or set ANTHROPIC_API_KEY
       --set-notion-token <token>   or set NOTION_TOKEN (internal integration secret)
       --set-notion-parent <page>   page URL/ID where the Recipes database is created
       --set-notion-database <db>   use an existing database instead

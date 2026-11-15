@@ -20,9 +20,11 @@ Get `TaoRecipe-<version>-win-x64.zip` from [Releases](../../releases), unzip it 
 2. **Transcript**: uploader subtitles when available, otherwise local **Whisper** (whisper.cpp via Whisper.net, large-v3-turbo by default,
    GPU via Vulkan with a normal graphics driver, or CUDA when the CUDA 13 runtime is installed; CPU fallback). The model downloads once to `%LOCALAPPDATA%\TaoRecipe\models`.
 3. **Frames**: ffmpeg samples frames on scene changes (at least every 20 s, at most every 3 s; up to 90, 640 px).
-4. **Claude** (Opus 5.5, adaptive thinking, structured JSON output) reads the metadata, transcript and frames together and writes the
-   recipe(s) in the target language, choosing the best timestamp for each step. Several recipes in one video become separate pages.
-   Server-side refusal fallback is enabled (beta `server-side-fallback-2026-07-01`).
+4. **Claude** (Opus 5.5, structured JSON output) reads the metadata, transcript and frames together and writes the recipe(s) in the
+   target language, choosing the best timestamp for each step. Several recipes in one video become separate pages. Two engines:
+   - **Claude subscription** (default, no extra cost): runs your installed, signed-in [Claude Code](https://claude.com/claude-code)
+     headless (`claude -p`, frames sent as images, `--json-schema` output). It uses your Pro/Max plan, not API credit.
+   - **Anthropic API key**: billed per token; adaptive thinking and server-side refusal fallback (beta `server-side-fallback-2026-07-01`).
 5. **Screenshots**: for each step, ffmpeg tests 5 frames around the chosen moment and keeps the sharpest (Laplacian variance) at up to 1600 px.
 6. **Notion**: API version 2026-03-11. The tool creates the database on first use under your parent page, uploads the images through the
    File Upload API, and creates the page.
@@ -32,24 +34,29 @@ not transcribe or bill Claude again. Use `--fresh` to force a redo.
 
 ## Setup
 
-Requirements: .NET 10, `yt-dlp` and `ffmpeg`/`ffprobe` on PATH (or set their paths in Settings).
+Requirements: `yt-dlp` and `ffmpeg`/`ffprobe` on PATH (or set their paths in Settings).
 
-1. **Anthropic API key** from console.anthropic.com.
+1. **Claude**: either install [Claude Code](https://claude.com/claude-code) and sign in with your Claude account (TaoRecipe shows a
+   **Sign in to Claude** prompt if needed), or switch the engine to an **Anthropic API key** from console.anthropic.com.
 2. **Notion**: create an *internal integration* at <https://www.notion.so/profile/integrations> with Read, Update and Insert content
    capabilities. Copy its secret. In Notion, open the page that should hold the Recipes database, then ••• → **Connections** → add the integration.
-3. Enter both, plus the page URL, in the GUI's **Settings** (click *Test connections*), or with the CLI:
+   To use an existing recipes database instead, put its link in the **Database** field; TaoRecipe fills the columns whose names
+   match (Name, Tags, Source, Cuisine, …) and writes everything else into the page body.
+3. Enter the token and the page or database URL in the GUI's **Settings** (click *Test connections*), or with the CLI:
 
 ```
-taorecipe-cli --set-anthropic-key sk-ant-...
 taorecipe-cli --set-notion-token ntn_...
 taorecipe-cli --set-notion-parent https://www.notion.so/My-Kitchen-0123456789abcdef0123456789abcdef
+taorecipe-cli --set-engine api                     # optional: use an API key instead of your subscription
+taorecipe-cli --set-anthropic-key sk-ant-...
 ```
 
 Secrets are stored DPAPI-encrypted in `%APPDATA%\TaoRecipe\settings.json`. `ANTHROPIC_API_KEY` / `NOTION_TOKEN` environment variables override them.
 
 ## Use
 
-GUI (`TaoRecipe.exe`): paste URLs or drop files/folders, choose the language, then click **Create recipes**.
+GUI (`TaoRecipe.exe`): paste URLs or drop files/folders (one per line; they run as a queue), choose the language, then click
+**Create recipes**. If one video fails, the rest continue.
 
 CLI:
 
@@ -63,8 +70,9 @@ Instagram, Facebook and similar sites may need cookies: set *yt-dlp extra argume
 
 ## Cost
 
-A 30-minute video sends about 90 small frames plus the transcript, roughly 40–60k input tokens, so it costs a few tens of cents on Opus 5.5.
-For cheaper runs, pick Sonnet 5.5 or lower the frame count in Settings.
+With the **Claude subscription** engine there is no extra cost: a 30-minute video uses about 40–50k input and 7k output tokens of your
+plan's usage (about a minute on Opus 5.5). Long queues can reach your plan's usage limit.
+With an **API key**, the same video costs a few tens of cents on Opus 5.5. Pick Sonnet 5.5 or lower the frame count for cheaper runs.
 
 ## Build
 
